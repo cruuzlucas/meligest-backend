@@ -3,7 +3,7 @@ const router = express.Router();
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const MercadoLivreService = require('../services/mercadolivre');
-const { pool } = require('../services/database');
+const { supabase } = require('../services/database');
 
 // Redireciona para login do Mercado Livre
 router.get('/login', (req, res) => {
@@ -29,28 +29,22 @@ router.get('/callback', async (req, res) => {
 
     const tokenExpiresAt = new Date(Date.now() + tokenData.expires_in * 1000);
 
-    // Upsert usuário no banco
-    const result = await pool.query(`
-      INSERT INTO users (ml_user_id, nickname, email, ml_access_token, ml_refresh_token, ml_token_expires_at)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      ON CONFLICT (ml_user_id) DO UPDATE SET
-        nickname = EXCLUDED.nickname,
-        email = EXCLUDED.email,
-        ml_access_token = EXCLUDED.ml_access_token,
-        ml_refresh_token = EXCLUDED.ml_refresh_token,
-        ml_token_expires_at = EXCLUDED.ml_token_expires_at,
-        updated_at = NOW()
-      RETURNING *
-    `, [
-      mlUser.id,
-      mlUser.nickname,
-      mlUser.email,
-      tokenData.access_token,
-      tokenData.refresh_token,
-      tokenExpiresAt
-    ]);
+    // Upsert usuário no banco via Supabase REST API
+    const { data: user, error: dbError } = await supabase
+      .from('users')
+      .upsert({
+        ml_user_id: String(mlUser.id),
+        nickname: mlUser.nickname,
+        email: mlUser.email,
+        ml_access_token: tokenData.access_token,
+        ml_refresh_token: tokenData.refresh_token,
+        ml_token_expires_at: tokenExpiresAt,
+        updated_at: new Date()
+      }, { onConflict: 'ml_user_id' })
+      .select()
+      .single();
 
-    const user = result.rows[0];
+    if (dbError) throw dbError;
 
     // Gera JWT para o frontend
     const appToken = jwt.sign(
@@ -77,18 +71,28 @@ router.post('/refresh', async (req, res) => {
 
   try {
     const decoded = jwt.verify(appToken, process.env.JWT_SECRET);
-    const userResult = await pool.query('SELECT * FROM users WHERE id = $1', [decoded.userId]);
-    const user = userResult.rows[0];
 
-    if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
+    const { data: user, error: findError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', decoded.userId)
+      .single();
+
+    if (findError || !user) return res.status(404).json({ error: 'Usuário não encontrado' });
 
     const newTokenData = await MercadoLivreService.refreshToken(user.ml_refresh_token);
     const tokenExpiresAt = new Date(Date.now() + newTokenData.expires_in * 1000);
 
-    await pool.query(`
-      UPDATE users SET ml_access_token = $1, ml_refresh_token = $2, ml_token_expires_at = $3
-      WHERE id = $4
-    `, [newTokenData.access_token, newTokenData.refresh_token, tokenExpiresAt, user.id]);
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({
+        ml_access_token: newTokenData.access_token,
+        ml_refresh_token: newTokenData.refresh_token,
+        ml_token_expires_at: tokenExpiresAt
+      })
+      .eq('id', user.id);
+
+    if (updateError) throw updateError;
 
     res.json({ success: true });
   } catch (err) {
@@ -109,11 +113,14 @@ router.get('/me', async (req, res) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const result = await pool.query(
-      'SELECT id, ml_user_id, nickname, email, plan, created_at FROM users WHERE id = $1',
-      [decoded.userId]
-    );
-    res.json(result.rows[0] || null);
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, ml_user_id, nickname, email, plan, created_at')
+      .eq('id', decoded.userId)
+      .single();
+
+    if (error) return res.json(null);
+    res.json(data);
   } catch {
     res.status(401).json({ error: 'Token inválido' });
   }
