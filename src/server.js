@@ -48,16 +48,32 @@ app.use('/api/relatorios', authenticateToken, relatorioRoutes);
 app.use('/api/usuarios', authenticateToken, usuarioRoutes);
 // TEMP - diagnóstico de banco (remover depois)
 app.get('/debug-db', async (req, res) => {
+  const raw = process.env.DATABASE_URL || '';
+  let parsed = null;
+  try {
+    const u = new URL(raw);
+    parsed = {
+      protocol: u.protocol,
+      user: u.username,
+      passwordLength: u.password ? u.password.length : 0,
+      host: u.hostname,
+      port: u.port,
+      database: u.pathname
+    };
+  } catch (e) {
+    parsed = { parseError: e.message };
+  }
+
   const { Pool } = require('pg');
   const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: raw,
     ssl: { rejectUnauthorized: false }
   });
   try {
     const result = await pool.query('SELECT NOW()');
-    res.json({ ok: true, time: result.rows[0] });
+    res.json({ ok: true, time: result.rows[0], rawLength: raw.length, parsed });
   } catch (err) {
-    res.json({ ok: false, error: err.message, code: err.code });
+    res.json({ ok: false, error: err.message, code: err.code, rawLength: raw.length, parsed });
   } finally {
     await pool.end();
   }
