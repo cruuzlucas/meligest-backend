@@ -46,20 +46,7 @@ app.use('/api/anuncios', authenticateToken, anuncioRoutes);
 app.use('/api/financeiro', authenticateToken, financeiroRoutes);
 app.use('/api/relatorios', authenticateToken, relatorioRoutes);
 app.use('/api/usuarios', authenticateToken, usuarioRoutes);
-// TEMP - diagnóstico de banco (remover depois)
-app.get('/debug-db', async (req, res) => {
-  const raw = process.env.DATABASE_URL || '';
-  let parsed = null;
-  try {
-    const u = new URL(raw);
-    parsed = {
-      protocol: u.protocol,
-      user: u.username,
-      passwordLength: u.password ? u.password.length : 0,
-      host: u.hostname,
-      port: u.port,
-      database: u.pathname
-    };
+
   } catch (e) {
     parsed = { parseError: e.message };
   }
