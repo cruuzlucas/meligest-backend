@@ -46,7 +46,22 @@ app.use('/api/anuncios', authenticateToken, anuncioRoutes);
 app.use('/api/financeiro', authenticateToken, financeiroRoutes);
 app.use('/api/relatorios', authenticateToken, relatorioRoutes);
 app.use('/api/usuarios', authenticateToken, usuarioRoutes);
-
+// TEMP - diagnóstico de banco (remover depois)
+app.get('/debug-db', async (req, res) => {
+  const { Pool } = require('pg');
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
+  });
+  try {
+    const result = await pool.query('SELECT NOW()');
+    res.json({ ok: true, time: result.rows[0] });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, code: err.code });
+  } finally {
+    await pool.end();
+  }
+});
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
